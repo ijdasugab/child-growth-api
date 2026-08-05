@@ -1,0 +1,269 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           BigInt    @id @default(autoincrement())
+  fullName     String    @map("full_name") @db.VarChar(100)
+  email        String    @unique @db.VarChar(150)
+  passwordHash String    @map("password_hash")
+  phoneNumber  String?   @map("phone_number") @db.VarChar(30)
+  isActive     Boolean?  @default(true) @map("is_active")
+  lastLoginAt  DateTime? @map("last_login_at") @db.Timestamp(6)
+  createdAt    DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt    DateTime? @default(now()) @map("updated_at") @db.Timestamp(6)
+
+  auditLogs     AuditLog[]
+  refreshTokens UserRefreshToken[]
+  userChildren  UserChild[]
+  userRoles     UserRole[]
+
+  @@index([email], map: "idx_users_email")
+  @@map("users")
+}
+
+model Role {
+  id          BigInt  @id @default(autoincrement())
+  code        String  @unique @db.VarChar(50)
+  name        String  @db.VarChar(100)
+  description String?
+
+  userRoles UserRole[]
+
+  @@map("roles")
+}
+
+model UserRole {
+  id        BigInt    @id @default(autoincrement())
+  userId    BigInt    @map("user_id")
+  roleId    BigInt    @map("role_id")
+  createdAt DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId], map: "uq_user_role")
+  @@index([userId], map: "idx_user_roles_user_id")
+  @@map("user_roles")
+}
+
+model UserChild {
+  id        BigInt    @id @default(autoincrement())
+  userId    BigInt    @map("user_id")
+  childId   BigInt    @map("child_id")
+  relation  String?   @db.VarChar(50)
+  createdAt DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+
+  child Child @relation(fields: [childId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, childId], map: "uq_user_child")
+  @@index([childId], map: "idx_user_children_child_id")
+  @@index([userId], map: "idx_user_children_user_id")
+  @@map("user_children")
+}
+
+model UserRefreshToken {
+  id           BigInt    @id @default(autoincrement())
+  userId       BigInt    @map("user_id")
+  refreshToken String    @map("refresh_token")
+  expiredAt    DateTime  @map("expired_at") @db.Timestamp(6)
+  revokedAt    DateTime? @map("revoked_at") @db.Timestamp(6)
+  createdAt    DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_refresh_tokens")
+}
+
+model AuditLog {
+  id        BigInt    @id @default(autoincrement())
+  userId    BigInt?   @map("user_id")
+  action    String    @db.VarChar(50)
+  tableName String?   @map("table_name") @db.VarChar(100)
+  recordId  BigInt?   @map("record_id")
+  oldData   Json?     @map("old_data")
+  newData   Json?     @map("new_data")
+  ipAddress String?   @map("ip_address") @db.VarChar(100)
+  userAgent String?   @map("user_agent")
+  createdAt DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([tableName, recordId], map: "idx_audit_logs_table_record")
+  @@index([userId], map: "idx_audit_logs_user_id")
+  @@map("audit_logs")
+}
+
+model Child {
+  id            BigInt    @id @default(autoincrement())
+  fullName      String    @map("full_name") @db.VarChar(100)
+  gender        String    @db.VarChar(10)
+  birthDate     DateTime  @map("birth_date") @db.Date
+  birthWeightKg Decimal?  @map("birth_weight_kg") @db.Decimal(5, 2)
+  birthLengthCm Decimal?  @map("birth_length_cm") @db.Decimal(5, 2)
+  createdAt     DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt     DateTime? @default(now()) @map("updated_at") @db.Timestamp(6)
+  createdBy     BigInt?   @map("created_by")
+  updatedBy     BigInt?   @map("updated_by")
+
+  immunizations ChildImmunization[]
+  measurements  ChildMeasurement[]
+  milestones    ChildMilestone[]
+  reminders     Reminder[]
+  userChildren  UserChild[]
+
+  @@map("children")
+}
+
+model ChildMeasurement {
+  id                      BigInt    @id @default(autoincrement())
+  childId                 BigInt    @map("child_id")
+  measuredAt              DateTime  @map("measured_at") @db.Date
+  weightKg                Decimal?  @map("weight_kg") @db.Decimal(5, 2)
+  heightCm                Decimal?  @map("height_cm") @db.Decimal(5, 2)
+  headCircumferenceCm     Decimal?  @map("head_circumference_cm") @db.Decimal(5, 2)
+  notes                   String?
+  ageInDays               Int?      @map("age_in_days")
+  weightForAgeStatus      String?   @map("weight_for_age_status") @db.VarChar(50)
+  heightForAgeStatus      String?   @map("height_for_age_status") @db.VarChar(50)
+  weightForHeightStatus   String?   @map("weight_for_height_status") @db.VarChar(50)
+  headCircumferenceStatus String?   @map("head_circumference_status") @db.VarChar(50)
+  createdAt               DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+  createdBy               BigInt?   @map("created_by")
+  updatedBy               BigInt?   @map("updated_by")
+  updatedAt               DateTime? @default(now()) @map("updated_at") @db.Timestamp(6)
+
+  child Child @relation(fields: [childId], references: [id])
+
+  @@unique([childId, measuredAt], map: "uq_child_measurement_date")
+  @@index([childId], map: "idx_child_measurements_child_id")
+  @@index([measuredAt], map: "idx_child_measurements_measured_at")
+  @@map("child_measurements")
+}
+
+model ChildImmunization {
+  id                   BigInt    @id @default(autoincrement())
+  childId              BigInt    @map("child_id")
+  immunizationMasterId BigInt?   @map("immunization_master_id")
+  givenDate            DateTime? @map("given_date") @db.Date
+  location             String?   @db.VarChar(150)
+  notes                String?
+  createdAt            DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+  createdBy            BigInt?   @map("created_by")
+  updatedBy            BigInt?   @map("updated_by")
+  updatedAt            DateTime? @default(now()) @map("updated_at") @db.Timestamp(6)
+
+  child              Child               @relation(fields: [childId], references: [id])
+  immunizationMaster ImmunizationMaster? @relation(fields: [immunizationMasterId], references: [id])
+
+  @@map("child_immunizations")
+}
+
+model ChildMilestone {
+  id                BigInt    @id @default(autoincrement())
+  childId           BigInt    @map("child_id")
+  milestoneMasterId BigInt    @map("milestone_master_id")
+  achieved          Boolean?  @default(false)
+  achievedDate      DateTime? @map("achieved_date") @db.Date
+  notes             String?
+  createdAt         DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+  createdBy         BigInt?   @map("created_by")
+  updatedBy         BigInt?   @map("updated_by")
+  updatedAt         DateTime? @default(now()) @map("updated_at") @db.Timestamp(6)
+
+  child           Child           @relation(fields: [childId], references: [id])
+  milestoneMaster MilestoneMaster @relation(fields: [milestoneMasterId], references: [id])
+
+  @@map("child_milestones")
+}
+
+model GrowthStandardType {
+  id   BigInt @id @default(autoincrement())
+  code String @unique @db.VarChar(30)
+  name String @db.VarChar(100)
+
+  standards GrowthStandard[]
+
+  @@map("growth_standard_types")
+}
+
+model GrowthStandard {
+  id             BigInt    @id @default(autoincrement())
+  standardTypeId BigInt    @map("standard_type_id")
+  gender         String    @db.VarChar(10)
+  ageInDays      Int?      @map("age_in_days")
+  heightCm       Decimal?  @map("height_cm") @db.Decimal(5, 2)
+  sdMinus3       Decimal?  @map("sd_minus_3") @db.Decimal(7, 3)
+  sdMinus2       Decimal?  @map("sd_minus_2") @db.Decimal(7, 3)
+  sdMinus1       Decimal?  @map("sd_minus_1") @db.Decimal(7, 3)
+  median         Decimal?  @db.Decimal(7, 3)
+  sdPlus1        Decimal?  @map("sd_plus_1") @db.Decimal(7, 3)
+  sdPlus2        Decimal?  @map("sd_plus_2") @db.Decimal(7, 3)
+  sdPlus3        Decimal?  @map("sd_plus_3") @db.Decimal(7, 3)
+  createdAt      DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+
+  standardType GrowthStandardType @relation(fields: [standardTypeId], references: [id])
+
+  @@index([standardTypeId, gender, ageInDays], map: "idx_growth_standards_type_gender_age")
+  @@index([standardTypeId, gender, heightCm], map: "idx_growth_standards_type_gender_height")
+  @@map("growth_standards")
+}
+
+model GrowthStatusRule {
+  id            BigInt   @id @default(autoincrement())
+  standardCode  String   @map("standard_code") @db.VarChar(30)
+  minZScore     Decimal? @map("min_z_score") @db.Decimal(4, 2)
+  maxZScore     Decimal? @map("max_z_score") @db.Decimal(4, 2)
+  statusLabel   String   @map("status_label") @db.VarChar(100)
+  description   String?
+  ageMinMonth   Int?     @default(0) @map("age_min_month")
+  ageMaxMonth   Int?     @default(60) @map("age_max_month")
+
+  @@map("growth_status_rules")
+}
+
+model ImmunizationMaster {
+  id                  BigInt  @id @default(autoincrement())
+  vaccineName         String  @map("vaccine_name") @db.VarChar(100)
+  recommendedAgeMonth Int?    @map("recommended_age_month")
+  description         String?
+
+  childImmunizations ChildImmunization[]
+
+  @@map("immunization_master")
+}
+
+model MilestoneMaster {
+  id            BigInt  @id @default(autoincrement())
+  ageMonth      Int     @map("age_month")
+  category      String? @db.VarChar(50)
+  milestoneText String  @map("milestone_text")
+
+  childMilestones ChildMilestone[]
+
+  @@map("milestone_master")
+}
+
+model Reminder {
+  id           BigInt    @id @default(autoincrement())
+  childId      BigInt    @map("child_id")
+  title        String    @db.VarChar(150)
+  reminderType String?   @map("reminder_type") @db.VarChar(50)
+  reminderDate DateTime  @map("reminder_date") @db.Date
+  isDone       Boolean?  @default(false) @map("is_done")
+  notes        String?
+  createdAt    DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+  createdBy    BigInt?   @map("created_by")
+  updatedBy    BigInt?   @map("updated_by")
+  updatedAt    DateTime? @default(now()) @map("updated_at") @db.Timestamp(6)
+
+  child Child @relation(fields: [childId], references: [id])
+
+  @@map("reminders")
+}
