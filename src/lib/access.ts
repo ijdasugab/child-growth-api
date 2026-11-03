@@ -2,7 +2,7 @@ import { isAdminRole } from "./auth.js";
 import { prisma } from "./prisma.js";
 
 export async function canAccessChild(user: { id: bigint; roles: string[] }, childId: bigint) {
-  if (isAdminRole(user.roles)) {
+  if (isAdminRole(user.roles) || user.roles.includes("GUEST")) {
     return true;
   }
 

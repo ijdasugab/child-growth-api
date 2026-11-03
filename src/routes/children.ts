@@ -6,6 +6,7 @@ import { isAdminRole } from "../lib/auth.js";
 import { sendJson } from "../lib/http.js";
 import { prisma } from "../lib/prisma.js";
 import { dateString, idParamSchema, optionalDecimal } from "../lib/validation.js";
+import { requireAdmin } from "../middleware/auth.js";
 
 const router = Router();
 
@@ -21,7 +22,7 @@ const childBodySchema = z.object({
 
 router.get("/", async (req, res, next) => {
   try {
-    const where = isAdminRole(req.user!.roles)
+    const where = isAdminRole(req.user!.roles) || req.user!.roles.includes("GUEST")
       ? {}
       : { userChildren: { some: { userId: req.user!.id } } };
 
@@ -102,7 +103,7 @@ router.get("/:id", async (req, res, next) => {
   }
 });
 
-router.put("/:id", async (req, res, next) => {
+router.put("/:id", requireAdmin, async (req, res, next) => {
   try {
     const { id } = idParamSchema.parse(req.params);
     await ensureChildAccess(req.user!, id);
@@ -137,7 +138,7 @@ router.put("/:id", async (req, res, next) => {
   }
 });
 
-router.delete("/:id", async (req, res, next) => {
+router.delete("/:id", requireAdmin, async (req, res, next) => {
   try {
     const { id } = idParamSchema.parse(req.params);
     await ensureChildAccess(req.user!, id);

@@ -7,7 +7,12 @@ export const requireAuth: RequestHandler = async (req, res, next) => {
   const token = header?.startsWith("Bearer ") ? header.slice("Bearer ".length) : undefined;
 
   if (!token) {
-    res.status(401).json({ message: "Missing bearer token" });
+    req.user = {
+      id: 1n,
+      email: "guest@natababy.local",
+      roles: ["GUEST"]
+    };
+    next();
     return;
   }
 
@@ -45,6 +50,15 @@ export const requireAuth: RequestHandler = async (req, res, next) => {
   } catch (error) {
     next(error);
   }
+};
+
+export const requireStrictAuth: RequestHandler = (req, res, next) => {
+  if (!req.user || req.user.roles.includes("GUEST")) {
+    res.status(401).json({ message: "Missing or invalid bearer token" });
+    return;
+  }
+
+  next();
 };
 
 export const requireAdmin: RequestHandler = (req, res, next) => {

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { createRefreshToken, getRefreshTokenExpiry, signAccessToken } from "../lib/auth.js";
 import { sendJson } from "../lib/http.js";
 import { prisma } from "../lib/prisma.js";
-import { requireAuth } from "../middleware/auth.js";
+import { requireAuth, requireStrictAuth } from "../middleware/auth.js";
 import { writeAuditLog } from "../lib/audit.js";
 
 const router = Router();
@@ -161,7 +161,7 @@ router.post("/refresh", async (req, res, next) => {
   }
 });
 
-router.post("/logout", requireAuth, async (req, res, next) => {
+router.post("/logout", requireStrictAuth, async (req, res, next) => {
   try {
     const body = refreshSchema.parse(req.body);
     await prisma.userRefreshToken.updateMany({
@@ -180,7 +180,7 @@ router.post("/logout", requireAuth, async (req, res, next) => {
   }
 });
 
-router.get("/me", requireAuth, async (req, res, next) => {
+router.get("/me", requireStrictAuth, async (req, res, next) => {
   try {
     const user = await prisma.user.findUniqueOrThrow({
       where: { id: req.user!.id },

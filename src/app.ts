@@ -1,5 +1,6 @@
 import cors from "cors";
 import express from "express";
+import path from "node:path";
 import swaggerUi from "swagger-ui-express";
 import { openApiDocument } from "./docs/openapi.js";
 import { adminRouter } from "./routes/admin.js";
@@ -18,7 +19,7 @@ export const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.get("/", (_req, res) => {
+app.get("/api", (_req, res) => {
   res.json({
     name: "Child Growth API",
     status: "ok",
@@ -51,5 +52,11 @@ app.use("/api/children/:childId/measurements", requireAuth, measurementsRouter);
 app.use("/api/children/:childId/immunizations", requireAuth, immunizationsRouter);
 app.use("/api/children/:childId/milestones", requireAuth, milestonesRouter);
 app.use("/api/children/:childId/reminders", requireAuth, remindersRouter);
+
+const webDistDir = path.resolve(process.cwd(), "../child-growth-web/dist");
+app.use(express.static(webDistDir));
+app.get(/^\/(?!api\/|health$|docs|openapi\.json$).*/, (_req, res) => {
+  res.sendFile(path.join(webDistDir, "index.html"));
+});
 
 app.use(errorHandler);
