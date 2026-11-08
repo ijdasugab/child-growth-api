@@ -2,11 +2,11 @@
 
 [![CI](https://github.com/ijdasugab/child-growth-api/actions/workflows/ci.yml/badge.svg)](https://github.com/ijdasugab/child-growth-api/actions/workflows/ci.yml)
 
-[![Node.js](https://img.shields.io/badge/Node.js-20.x-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-22.x-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Express](https://img.shields.io/badge/Express-4.x-000000?logo=express&logoColor=white)](https://expressjs.com/)
 [![Prisma](https://img.shields.io/badge/Prisma-5.22-2D3748?logo=prisma&logoColor=white)](https://www.prisma.io/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![Swagger](https://img.shields.io/badge/API%20Docs-Swagger-85EA2D?logo=swagger&logoColor=black)](http://localhost:3000/docs)
 
 Backend API sederhana untuk MVP aplikasi pertumbuhan anak.
@@ -162,6 +162,7 @@ Dokumentasi API:
 - `GET /api/children/:childId/immunizations`
 - `POST /api/children/:childId/immunizations`
 - `PUT /api/children/:childId/immunizations/:id`
+- `GET /api/children/:childId/immunizations/schedule`
 - `GET /api/children/:childId/milestones`
 - `POST /api/children/:childId/milestones`
 - `PUT /api/children/:childId/milestones/:id`
@@ -215,6 +216,25 @@ curl -X POST http://localhost:3000/api/children/1/measurements \
   }'
 ```
 
-## Catatan YAGNI
+## Pengujian
 
-Untuk MVP ini auth sudah memakai JWT sederhana dan refresh token DB. Belum ditambahkan Docker, test suite, atau kalkulasi z-score otomatis. Status pertumbuhan bisa disimpan di measurement dan aturan status tersedia lewat endpoint master data.
+20 test, dijalankan dengan `npm test`. Yang diuji: rumus LMS untuk L bukan nol
+dan L mendekati nol, interpolasi antar titik SD, ekstrapolasi di luar rentang
+beserta batasnya, dan penolakan data acuan yang urutannya rusak.
+
+## CI dan deploy
+
+`.github/workflows/ci.yml` menjalankan `npm ci`, `prisma generate`, `typecheck`,
+`test`, dan `build` pada setiap push ke `main` dan setiap pull request.
+
+Deploy dijalankan terpisah, dari sisi server. Skrip di server memeriksa commit
+terakhir `main` yang sudah hijau di CI, lalu pull, build, dan restart service.
+Commit yang CI-nya belum hijau tidak pernah terpasang. Migrasi Prisma tidak
+dijalankan otomatis, supaya migrasi yang salah tidak menimpa data produksi tanpa
+cadangan.
+
+## Catatan
+
+Status gizi dihitung server dari tabel acuan, bukan diterima dari klien. Nilai z
+disimpan di empat kolom. Peran `GUEST` sudah dihapus: semua endpoint data anak
+wajib token, dan endpoint tulis diperiksa identitasnya.
