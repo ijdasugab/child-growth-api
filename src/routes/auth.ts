@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import { Router } from "express";
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { z } from "zod";
 import { createRefreshToken, getRefreshTokenExpiry, signAccessToken } from "../lib/auth.js";
 import { sendJson } from "../lib/http.js";
@@ -44,10 +44,16 @@ const authLimiter = rateLimit({
     const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
     // Cloudflare menaruh IP asli di cf-connecting-ip. Kalau tidak ada, pakai
     // hop pertama X-Forwarded-For, lalu jatuh ke req.ip.
-    const forwarded = req.get("cf-connecting-ip")
-      ?? req.get("x-forwarded-for")?.split(",")[0]?.trim()
-      ?? req.ip
-      ?? "unknown";
+    //
+    // ipKeyGenerator menormalkan alamat IPv6: ::ffff:1.2.3.4 dan 1.2.3.4
+    // dihitung sebagai kunci yang sama. Tanpa itu, satu klien IPv6 bisa
+    // memakai bentuk alamat berbeda untuk melewati batas ini.
+    const forwarded = ipKeyGenerator(
+      req.get("cf-connecting-ip")
+        ?? req.get("x-forwarded-for")?.split(",")[0]?.trim()
+        ?? req.ip
+        ?? "unknown"
+    );
     return `${email || "-"}|${forwarded}`;
   }
 });
