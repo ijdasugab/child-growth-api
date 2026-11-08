@@ -6,13 +6,10 @@ export const requireAuth: RequestHandler = async (req, res, next) => {
   const header = req.get("authorization");
   const token = header?.startsWith("Bearer ") ? header.slice("Bearer ".length) : undefined;
 
+  // P0-1: tidak ada token berarti tidak ada identitas. Dulu di sini dibuat
+  // peran GUEST yang bisa membaca semua data anak.
   if (!token) {
-    req.user = {
-      id: 1n,
-      email: "guest@natababy.local",
-      roles: ["GUEST"]
-    };
-    next();
+    res.status(401).json({ message: "Missing bearer token" });
     return;
   }
 
@@ -53,7 +50,8 @@ export const requireAuth: RequestHandler = async (req, res, next) => {
 };
 
 export const requireStrictAuth: RequestHandler = (req, res, next) => {
-  if (!req.user || req.user.roles.includes("GUEST")) {
+  // Peran GUEST sudah tidak pernah terbentuk, jadi cukup periksa identitas.
+  if (!req.user) {
     res.status(401).json({ message: "Missing or invalid bearer token" });
     return;
   }

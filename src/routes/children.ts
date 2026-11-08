@@ -6,7 +6,7 @@ import { isAdminRole } from "../lib/auth.js";
 import { sendJson } from "../lib/http.js";
 import { prisma } from "../lib/prisma.js";
 import { dateString, idParamSchema, optionalDecimal } from "../lib/validation.js";
-import { requireAdmin } from "../middleware/auth.js";
+import { requireAdmin, requireStrictAuth } from "../middleware/auth.js";
 
 const router = Router();
 
@@ -22,7 +22,7 @@ const childBodySchema = z.object({
 
 router.get("/", async (req, res, next) => {
   try {
-    const where = isAdminRole(req.user!.roles) || req.user!.roles.includes("GUEST")
+    const where = isAdminRole(req.user!.roles)
       ? {}
       : { userChildren: { some: { userId: req.user!.id } } };
 
@@ -38,7 +38,7 @@ router.get("/", async (req, res, next) => {
   }
 });
 
-router.post("/", async (req, res, next) => {
+router.post("/", requireStrictAuth, async (req, res, next) => {
   try {
     const body = childBodySchema.parse(req.body);
     const ownerUserId = isAdminRole(req.user!.roles) ? body.ownerUserId ?? req.user!.id : req.user!.id;
@@ -158,7 +158,8 @@ router.delete("/:id", requireAdmin, async (req, res, next) => {
   }
 });
 
-router.post("/:id/users", async (req, res, next) => {
+// P0-2: mengaitkan anak ke akun lain adalah tindakan administratif.
+router.post("/:id/users", requireAdmin, async (req, res, next) => {
   try {
     const { id } = idParamSchema.parse(req.params);
     if (!isAdminRole(req.user!.roles) && !(await canAccessChild(req.user!, id))) {
@@ -219,10 +220,11 @@ function toChildResponse(child: {
     ...child,
     users: child.userChildren?.map((userChild) => ({
       relation: userChild.relation,
+      // P0-3: email pemilik tidak ikut dikirim. Yang butuh email pakai
+      // endpoint admin, bukan respons yang dibaca orang tua lain.
       user: {
         id: userChild.user.id,
-        fullName: userChild.user.fullName,
-        email: userChild.user.email
+        fullName: userChild.user.fullName
       }
     })),
     userChildren: undefined

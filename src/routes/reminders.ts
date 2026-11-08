@@ -5,6 +5,7 @@ import { writeAuditLog } from "../lib/audit.js";
 import { sendJson } from "../lib/http.js";
 import { prisma } from "../lib/prisma.js";
 import { childIdParamSchema, dateString, idParamSchema } from "../lib/validation.js";
+import { requireStrictAuth } from "../middleware/auth.js";
 
 const router = Router({ mergeParams: true });
 
@@ -32,7 +33,7 @@ router.get("/", async (req, res, next) => {
   }
 });
 
-router.post("/", async (req, res, next) => {
+router.post("/", requireStrictAuth, async (req, res, next) => {
   try {
     const { childId } = childIdParamSchema.parse(req.params);
     await ensureChildAccess(req.user!, childId);
@@ -64,7 +65,7 @@ router.post("/", async (req, res, next) => {
   }
 });
 
-router.patch("/:id/done", async (req, res, next) => {
+router.patch("/:id/done", requireStrictAuth, async (req, res, next) => {
   try {
     const { childId } = childIdParamSchema.parse(req.params);
     const { id } = idParamSchema.parse(req.params);

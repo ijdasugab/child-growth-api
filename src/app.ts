@@ -16,8 +16,18 @@ import { requireAuth } from "./middleware/auth.js";
 
 export const app = express();
 
-app.use(cors());
-app.use(express.json());
+app.use(
+  cors({
+    // P0-5: produksi menyajikan web dari origin yang sama, jadi CORS tidak
+    // dibutuhkan. Daftar origin hanya dipakai kalau memang ada klien terpisah.
+    origin: (process.env.CORS_ORIGINS ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean),
+    credentials: false
+  })
+);
+app.use(express.json({ limit: "100kb" }));
 
 app.get("/api", (_req, res) => {
   res.json({
@@ -56,6 +66,7 @@ app.use("/api/children/:childId/reminders", requireAuth, remindersRouter);
 const webDistDir = path.resolve(process.cwd(), "../child-growth-web/dist");
 app.use(express.static(webDistDir));
 app.get(/^\/(?!api\/|health$|docs|openapi\.json$).*/, (_req, res) => {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
   res.sendFile(path.join(webDistDir, "index.html"));
 });
 

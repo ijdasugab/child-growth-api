@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { createRefreshToken, getRefreshTokenExpiry, signAccessToken } from "../lib/auth.js";
 import { sendJson } from "../lib/http.js";
@@ -25,7 +26,33 @@ const refreshSchema = z.object({
   refreshToken: z.string().min(1)
 });
 
-router.post("/register", async (req, res, next) => {
+// P0-6: batasi percobaan login dan register. Tanpa ini password bisa ditebak
+// ribuan kali per menit, dan bcrypt 10 round sudah cukup membuat server sibuk.
+//
+// Kuncinya gabungan email + IP asal, bukan IP saja. Alasannya: seluruh lalu
+// lintas dari natababy.online masuk lewat tunnel Cloudflare, jadi IP yang
+// terlihat server selalu sama. Kalau kuncinya hanya IP, satu penyerang bisa
+// menghabiskan kuota dan ikut mengunci pemilik akun yang sah.
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: { message: "Terlalu banyak percobaan. Coba lagi dalam 15 menit." },
+  keyGenerator: (req) => {
+    const body = (req.body ?? {}) as { email?: unknown };
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    // Cloudflare menaruh IP asli di cf-connecting-ip. Kalau tidak ada, pakai
+    // hop pertama X-Forwarded-For, lalu jatuh ke req.ip.
+    const forwarded = req.get("cf-connecting-ip")
+      ?? req.get("x-forwarded-for")?.split(",")[0]?.trim()
+      ?? req.ip
+      ?? "unknown";
+    return `${email || "-"}|${forwarded}`;
+  }
+});
+
+router.post("/register", authLimiter, async (req, res, next) => {
   try {
     const body = registerSchema.parse(req.body);
     const passwordHash = await bcrypt.hash(body.password, 10);
@@ -79,7 +106,7 @@ router.post("/register", async (req, res, next) => {
   }
 });
 
-router.post("/login", async (req, res, next) => {
+router.post("/login", authLimiter, async (req, res, next) => {
   try {
     const body = loginSchema.parse(req.body);
     const user = await prisma.user.findUnique({
@@ -149,19 +176,38 @@ router.post("/refresh", async (req, res, next) => {
     }
 
     const roles = existingToken.user.userRoles.map((userRole) => userRole.role.code);
+
+    // P1-5: rotasi. Token lama dicabut, token baru diterbitkan, dalam satu
+    // transaksi. Tanpa ini satu token bocor bisa dipakai 30 hari penuh.
+    const nextRefreshToken = createRefreshToken();
+    await prisma.$transaction([
+      prisma.userRefreshToken.update({
+        where: { id: existingToken.id },
+        data: { revokedAt: new Date() }
+      }),
+      prisma.userRefreshToken.create({
+        data: {
+          userId: existingToken.userId,
+          refreshToken: nextRefreshToken,
+          expiredAt: getRefreshTokenExpiry()
+        }
+      })
+    ]);
+
     sendJson(res, {
       accessToken: signAccessToken({
         userId: existingToken.user.id,
         email: existingToken.user.email,
         roles
-      })
+      }),
+      refreshToken: nextRefreshToken
     });
   } catch (error) {
     next(error);
   }
 });
 
-router.post("/logout", requireStrictAuth, async (req, res, next) => {
+router.post("/logout", requireAuth, async (req, res, next) => {
   try {
     const body = refreshSchema.parse(req.body);
     await prisma.userRefreshToken.updateMany({
@@ -180,7 +226,7 @@ router.post("/logout", requireStrictAuth, async (req, res, next) => {
   }
 });
 
-router.get("/me", requireStrictAuth, async (req, res, next) => {
+router.get("/me", requireAuth, async (req, res, next) => {
   try {
     const user = await prisma.user.findUniqueOrThrow({
       where: { id: req.user!.id },

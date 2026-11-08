@@ -25,13 +25,33 @@ Project ini dibuat dengan pendekatan sederhana dan bertahap agar mudah dikembang
 
 ## Fitur Utama
 
-- Authentication dengan JWT access token dan refresh token.
-- Role user: `SUPER_ADMIN`, `ADMIN`, dan `PARENT`.
+- Authentication dengan JWT access token dan refresh token yang dirotasi setiap
+  dipakai.
+- Role user: `SUPER_ADMIN`, `ADMIN`, dan `PARENT`. Tidak ada lagi peran `GUEST`
+  otomatis: semua endpoint data anak wajib token.
+- Setiap endpoint tulis diperiksa identitas, dan data anak diperiksa lewat
+  relasi `user_children`.
+- Status gizi dihitung server dari tabel acuan, bukan diterima dari klien.
+  Nilai z ikut disimpan di empat kolom.
+- Batas 10 percobaan login per 15 menit per akun.
 - Relasi user ke children melalui `user_children`.
 - Audit trail untuk aktivitas create, update, delete, login, dan logout.
 - Measurement history untuk melihat perkembangan anak.
 - Master data growth standards, growth status rules, imunisasi, dan milestone.
 - Dokumentasi API dengan Swagger UI.
+
+## Perintah
+
+```bash
+npm run dev            # server development dengan watch
+npm run build          # kompilasi ke dist
+npm start              # jalankan hasil build
+npm test               # uji perhitungan z-score
+npm run typecheck      # periksa tipe src, tests, scripts, prisma
+npm run db:seed        # isi data acuan
+npm run admin:create   # buat akun admin pertama
+npm run prisma:studio  # GUI database
+```
 
 ## Setup
 
@@ -66,28 +86,39 @@ Project ini dibuat dengan pendekatan sederhana dan bertahap agar mudah dikembang
    ALTER USER child_growth_user WITH PASSWORD 'password';
    ```
 
-5. Muat isi `.env` ke terminal aktif:
+5. Isi juga `JWT_SECRET`. Server menolak start kalau kosong, masih nilai contoh,
+   atau kurang dari 32 karakter:
 
    ```bash
-   set -a
-   source .env
-   set +a
+   openssl rand -hex 32
    ```
 
-6. Restore schema dan master data ke database PostgreSQL:
+   Variabel opsional: `CORS_ORIGINS`, berisi daftar origin yang dipisah koma.
+   Kosong berarti tidak ada header CORS, dan itu yang benar untuk produksi
+   karena web disajikan dari origin yang sama.
 
-   ```bash
-   psql "$DATABASE_URL" < "/Users/bagusamudra/Development/Child App/schema.sql"
-   psql "$DATABASE_URL" < "/Users/bagusamudra/Development/Child App/master_data.sql"
-   ```
-
-7. Generate Prisma Client:
+6. Generate Prisma Client dan terapkan migrasi:
 
    ```bash
    npm run prisma:generate
+   npx prisma migrate deploy
    ```
 
-8. Jalankan server development:
+7. Isi data acuan: peran, tipe standar, aturan status, standar pertumbuhan,
+   imunisasi, dan milestone. Idempoten, aman dijalankan berulang:
+
+   ```bash
+   npm run db:seed
+   ```
+
+8. Buat akun admin pertama. Registrasi publik hanya menghasilkan peran `PARENT`,
+   jadi akun pengelola dibuat lewat skrip ini:
+
+   ```bash
+   npm run admin:create -- --email "emailmu@contoh.com" --password "passwordku" --name "Nama"
+   ```
+
+9. Jalankan server development:
 
    ```bash
    npm run dev

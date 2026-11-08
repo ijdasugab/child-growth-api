@@ -41,5 +41,11 @@ export function isAdminRole(roles: string[]) {
 }
 
 function getJwtSecret() {
-  return process.env.JWT_SECRET ?? "dev-only-change-me";
+  // P0-4: tidak ada nilai cadangan. Kalau kosong, lebih baik gagal terang-terangan
+  // daripada jalan dengan kunci yang diketahui publik.
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error("JWT_SECRET is not configured");
+  }
+  return secret;
 }

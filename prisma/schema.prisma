@@ -18,10 +18,11 @@ model User {
   createdAt    DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
   updatedAt    DateTime? @default(now()) @map("updated_at") @db.Timestamp(6)
 
-  auditLogs     AuditLog[]
-  refreshTokens UserRefreshToken[]
-  userChildren  UserChild[]
-  userRoles     UserRole[]
+  auditLogs        AuditLog[]
+  refreshTokens    UserRefreshToken[]
+  userChildren     UserChild[]
+  userRoles        UserRole[]
+  maternalProfiles MaternalProfile[]
 
   @@index([email], map: "idx_users_email")
   @@map("users")
@@ -78,6 +79,9 @@ model UserRefreshToken {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  // P1-5: tanpa index, pencarian token saat refresh memindai seluruh tabel.
+  @@index([refreshToken], map: "idx_refresh_tokens_token")
+  @@index([userId, revokedAt], map: "idx_refresh_tokens_user_active")
   @@map("user_refresh_tokens")
 }
 
@@ -130,10 +134,19 @@ model ChildMeasurement {
   headCircumferenceCm     Decimal?  @map("head_circumference_cm") @db.Decimal(5, 2)
   notes                   String?
   ageInDays               Int?      @map("age_in_days")
+  // P1-1 + P1-2: status diturunkan dari z-score di server, dan nilai z ikut
+  // disimpan supaya bisa dihitung ulang saat tabel acuan diperbarui.
+  weightForAgeZ           Decimal?  @map("weight_for_age_z") @db.Decimal(4, 2)
+  heightForAgeZ           Decimal?  @map("height_for_age_z") @db.Decimal(4, 2)
+  weightForHeightZ        Decimal?  @map("weight_for_height_z") @db.Decimal(4, 2)
+  headCircumferenceZ      Decimal?  @map("head_circumference_z") @db.Decimal(4, 2)
   weightForAgeStatus      String?   @map("weight_for_age_status") @db.VarChar(50)
   heightForAgeStatus      String?   @map("height_for_age_status") @db.VarChar(50)
   weightForHeightStatus   String?   @map("weight_for_height_status") @db.VarChar(50)
   headCircumferenceStatus String?   @map("head_circumference_status") @db.VarChar(50)
+  armCircumferenceCm      Decimal?  @map("arm_circumference_cm") @db.Decimal(5, 2)
+  armCircumferenceStatus  String?   @map("arm_circumference_status") @db.VarChar(50)
+  growthTrend             String?   @map("growth_trend") @db.VarChar(10)
   createdAt               DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
   createdBy               BigInt?   @map("created_by")
   updatedBy               BigInt?   @map("updated_by")
@@ -153,6 +166,8 @@ model ChildImmunization {
   immunizationMasterId BigInt?   @map("immunization_master_id")
   givenDate            DateTime? @map("given_date") @db.Date
   location             String?   @db.VarChar(150)
+  batchNumber          String?   @map("batch_number") @db.VarChar(100)
+  administeredBy       String?   @map("administered_by") @db.VarChar(100)
   notes                String?
   createdAt            DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
   createdBy            BigInt?   @map("created_by")
@@ -180,6 +195,8 @@ model ChildMilestone {
   child           Child           @relation(fields: [childId], references: [id])
   milestoneMaster MilestoneMaster @relation(fields: [milestoneMasterId], references: [id])
 
+  // P1-3: satu milestone hanya boleh tercatat sekali per anak.
+  @@unique([childId, milestoneMasterId], map: "uq_child_milestone")
   @@map("child_milestones")
 }
 
@@ -188,7 +205,8 @@ model GrowthStandardType {
   code String @unique @db.VarChar(30)
   name String @db.VarChar(100)
 
-  standards GrowthStandard[]
+  standards   GrowthStandard[]
+  statusRules GrowthStatusRule[]
 
   @@map("growth_standard_types")
 }
@@ -206,6 +224,11 @@ model GrowthStandard {
   sdPlus1        Decimal?  @map("sd_plus_1") @db.Decimal(7, 3)
   sdPlus2        Decimal?  @map("sd_plus_2") @db.Decimal(7, 3)
   sdPlus3        Decimal?  @map("sd_plus_3") @db.Decimal(7, 3)
+  // P1-2: parameter LMS WHO. Kalau terisi, z dihitung eksak; kalau kosong,
+  // perhitungan jatuh ke interpolasi linear antar titik SD (pendekatan).
+  l              Decimal?  @db.Decimal(10, 6)
+  m              Decimal?  @db.Decimal(10, 6)
+  s              Decimal?  @db.Decimal(10, 6)
   createdAt      DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
 
   standardType GrowthStandardType @relation(fields: [standardTypeId], references: [id])
@@ -216,15 +239,19 @@ model GrowthStandard {
 }
 
 model GrowthStatusRule {
-  id            BigInt   @id @default(autoincrement())
-  standardCode  String   @map("standard_code") @db.VarChar(30)
-  minZScore     Decimal? @map("min_z_score") @db.Decimal(4, 2)
-  maxZScore     Decimal? @map("max_z_score") @db.Decimal(4, 2)
-  statusLabel   String   @map("status_label") @db.VarChar(100)
-  description   String?
-  ageMinMonth   Int?     @default(0) @map("age_min_month")
-  ageMaxMonth   Int?     @default(60) @map("age_max_month")
+  id           BigInt   @id @default(autoincrement())
+  standardCode String   @map("standard_code") @db.VarChar(30)
+  minZScore    Decimal? @map("min_z_score") @db.Decimal(4, 2)
+  maxZScore    Decimal? @map("max_z_score") @db.Decimal(4, 2)
+  statusLabel  String   @map("status_label") @db.VarChar(100)
+  description  String?
+  ageMinMonth  Int?     @default(0) @map("age_min_month")
+  ageMaxMonth  Int?     @default(60) @map("age_max_month")
 
+  // P1-4: kode harus benar-benar ada di growth_standard_types.
+  standardType GrowthStandardType @relation(fields: [standardCode], references: [code])
+
+  @@index([standardCode, minZScore, maxZScore], map: "idx_status_rules_lookup")
   @@map("growth_status_rules")
 }
 
@@ -236,6 +263,7 @@ model ImmunizationMaster {
 
   childImmunizations ChildImmunization[]
 
+  @@unique([vaccineName, recommendedAgeMonth], map: "uq_immunization_name_age")
   @@map("immunization_master")
 }
 
@@ -247,6 +275,7 @@ model MilestoneMaster {
 
   childMilestones ChildMilestone[]
 
+  @@unique([ageMonth, milestoneText], map: "uq_milestone_age_text")
   @@map("milestone_master")
 }
 
@@ -265,5 +294,90 @@ model Reminder {
 
   child Child @relation(fields: [childId], references: [id])
 
+  @@index([childId, reminderDate], map: "idx_reminders_child_date")
   @@map("reminders")
+}
+
+// =============================================================================
+// PILAR IBU (MATERNAL HEALTH) - BUKU KIA 2024
+// =============================================================================
+
+model MaternalProfile {
+  id                   BigInt    @id @default(autoincrement())
+  userId               BigInt    @map("user_id")
+  motherName           String    @map("mother_name") @db.VarChar(100)
+  hphtDate             DateTime? @map("hpht_date") @db.Date
+  estimatedDueDate     DateTime? @map("estimated_due_date") @db.Date
+  prePregnancyWeightKg Decimal?  @map("pre_pregnancy_weight_kg") @db.Decimal(5, 2)
+  heightCm             Decimal?  @map("height_cm") @db.Decimal(5, 2)
+  gravida              Int?      @default(1)
+  para                 Int?      @default(0)
+  abortus              Int?      @default(0)
+  status               String?   @default("ACTIVE") @db.VarChar(30)
+  notes                String?
+  createdAt            DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt            DateTime? @default(now()) @map("updated_at") @db.Timestamp(6)
+
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ancVisits  AncVisit[]
+  ttdLogs    MaternalTtdLog[]
+  birthPlans BirthPlan[]
+
+  @@index([userId], map: "idx_maternal_profiles_user_id")
+  @@map("maternal_profiles")
+}
+
+model AncVisit {
+  id                  BigInt    @id @default(autoincrement())
+  maternalProfileId   BigInt    @map("maternal_profile_id")
+  visitNumber         Int       @map("visit_number")
+  trimester           Int       @map("trimester")
+  visitDate           DateTime? @map("visit_date") @db.Date
+  gestationalAgeWeeks Int?      @map("gestational_age_weeks")
+  weightKg            Decimal?  @map("weight_kg") @db.Decimal(5, 2)
+  bloodPressure       String?   @map("blood_pressure") @db.VarChar(30)
+  fundalHeightCm      Decimal?  @map("fundal_height_cm") @db.Decimal(5, 2)
+  fetalHeartRateBpm   Int?      @map("fetal_heart_rate_bpm")
+  hemoglobin          Decimal?  @map("hemoglobin") @db.Decimal(4, 1)
+  location            String?   @db.VarChar(150)
+  examinerName        String?   @map("examiner_name") @db.VarChar(100)
+  notes               String?
+  createdAt           DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt           DateTime? @default(now()) @map("updated_at") @db.Timestamp(6)
+
+  maternalProfile MaternalProfile @relation(fields: [maternalProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([maternalProfileId, visitNumber], map: "uq_anc_visit_number")
+  @@map("anc_visits")
+}
+
+model MaternalTtdLog {
+  id                BigInt    @id @default(autoincrement())
+  maternalProfileId BigInt    @map("maternal_profile_id")
+  takenDate         DateTime  @map("taken_date") @db.Date
+  pillsTaken        Int       @default(1) @map("pills_taken")
+  notes             String?
+  createdAt         DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+
+  maternalProfile MaternalProfile @relation(fields: [maternalProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([maternalProfileId, takenDate], map: "uq_maternal_ttd_date")
+  @@map("maternal_ttd_logs")
+}
+
+model BirthPlan {
+  id                  BigInt    @id @default(autoincrement())
+  maternalProfileId   BigInt    @map("maternal_profile_id")
+  birthAttendant      String?   @map("birth_attendant") @db.VarChar(100)
+  facilityName        String?   @map("facility_name") @db.VarChar(150)
+  companionName       String?   @map("companion_name") @db.VarChar(100)
+  emergencyTransport  String?   @map("emergency_transport") @db.VarChar(150)
+  bloodDonors         String?   @map("blood_donors") @db.VarChar(255)
+  chosenContraception String?   @map("chosen_contraception") @db.VarChar(100)
+  createdAt           DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt           DateTime? @default(now()) @map("updated_at") @db.Timestamp(6)
+
+  maternalProfile MaternalProfile @relation(fields: [maternalProfileId], references: [id], onDelete: Cascade)
+
+  @@map("birth_plans")
 }

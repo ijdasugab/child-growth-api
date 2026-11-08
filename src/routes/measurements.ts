@@ -5,6 +5,8 @@ import { writeAuditLog } from "../lib/audit.js";
 import { sendJson } from "../lib/http.js";
 import { prisma } from "../lib/prisma.js";
 import { childIdParamSchema, dateString, idParamSchema, optionalDecimal } from "../lib/validation.js";
+import { computeArmCircumferenceStatus, computeGrowthStatus, computeGrowthTrend } from "../lib/growth.js";
+import { requireStrictAuth } from "../middleware/auth.js";
 
 const router = Router({ mergeParams: true });
 
@@ -13,11 +15,10 @@ const measurementBodySchema = z.object({
   weightKg: optionalDecimal,
   heightCm: optionalDecimal,
   headCircumferenceCm: optionalDecimal,
-  notes: z.string().optional(),
-  weightForAgeStatus: z.string().max(50).optional(),
-  heightForAgeStatus: z.string().max(50).optional(),
-  weightForHeightStatus: z.string().max(50).optional(),
-  headCircumferenceStatus: z.string().max(50).optional()
+  armCircumferenceCm: optionalDecimal,
+  notes: z.string().optional()
+  // P1-1: field status tidak lagi diterima dari klien. Server yang menghitung
+  // dari tabel acuan, supaya klien tidak bisa mengarang label "Normal".
 });
 
 router.get("/", async (req, res, next) => {
@@ -54,6 +55,9 @@ router.get("/history", async (req, res, next) => {
         cm.weight_kg,
         cm.height_cm,
         cm.head_circumference_cm,
+        cm.arm_circumference_cm,
+        cm.arm_circumference_status,
+        cm.growth_trend,
         cm.weight_for_age_status,
         cm.height_for_age_status,
         cm.weight_for_height_status,
@@ -75,7 +79,7 @@ router.get("/history", async (req, res, next) => {
   }
 });
 
-router.post("/", async (req, res, next) => {
+router.post("/", requireStrictAuth, async (req, res, next) => {
   try {
     const { childId } = childIdParamSchema.parse(req.params);
     await ensureChildAccess(req.user!, childId);
@@ -85,6 +89,28 @@ router.post("/", async (req, res, next) => {
     const measuredAt = new Date(body.measuredAt);
     const ageInDays = Math.floor((measuredAt.getTime() - child.birthDate.getTime()) / 86_400_000);
 
+    // P1-1 + P1-2: status dan z dihitung server dari tabel acuan.
+    const growth = await computeGrowthStatus({
+      gender: child.gender,
+      ageInDays,
+      weightKg: body.weightKg ?? null,
+      heightCm: body.heightCm ?? null,
+      headCircumferenceCm: body.headCircumferenceCm ?? null
+    });
+
+    const ageMonth = Math.floor(ageInDays / 30.4375);
+    const armStatus = computeArmCircumferenceStatus(body.armCircumferenceCm ?? null, ageMonth);
+
+    // Cari pengukuran sebelumnya untuk menghitung tren kenaikan BB (N / T)
+    const prevMeasurement = await prisma.childMeasurement.findFirst({
+      where: { childId, measuredAt: { lt: measuredAt } },
+      orderBy: { measuredAt: "desc" }
+    });
+    const prevWeight = prevMeasurement?.weightKg !== null && prevMeasurement?.weightKg !== undefined
+      ? Number(prevMeasurement.weightKg)
+      : null;
+    const growthTrend = computeGrowthTrend(body.weightKg ?? null, prevWeight);
+
     const measurement = await prisma.childMeasurement.create({
       data: {
         childId,
@@ -93,11 +119,18 @@ router.post("/", async (req, res, next) => {
         weightKg: body.weightKg,
         heightCm: body.heightCm,
         headCircumferenceCm: body.headCircumferenceCm,
+        armCircumferenceCm: body.armCircumferenceCm,
+        armCircumferenceStatus: armStatus,
+        growthTrend,
         notes: body.notes,
-        weightForAgeStatus: body.weightForAgeStatus,
-        heightForAgeStatus: body.heightForAgeStatus,
-        weightForHeightStatus: body.weightForHeightStatus,
-        headCircumferenceStatus: body.headCircumferenceStatus,
+        weightForAgeZ: growth.weightForAge.z,
+        heightForAgeZ: growth.heightForAge.z,
+        weightForHeightZ: growth.weightForHeight.z,
+        headCircumferenceZ: growth.headCircumference.z,
+        weightForAgeStatus: growth.weightForAge.label,
+        heightForAgeStatus: growth.heightForAge.label,
+        weightForHeightStatus: growth.weightForHeight.label,
+        headCircumferenceStatus: growth.headCircumference.label,
         createdBy: req.user!.id,
         updatedBy: req.user!.id
       }
@@ -116,7 +149,7 @@ router.post("/", async (req, res, next) => {
   }
 });
 
-router.put("/:id", async (req, res, next) => {
+router.put("/:id", requireStrictAuth, async (req, res, next) => {
   try {
     const { childId } = childIdParamSchema.parse(req.params);
     const { id } = idParamSchema.parse(req.params);
@@ -127,10 +160,36 @@ router.put("/:id", async (req, res, next) => {
       where: { id, childId }
     });
 
+    const child = await prisma.child.findUniqueOrThrow({ where: { id: childId } });
     const measuredAt = body.measuredAt ? new Date(body.measuredAt) : undefined;
-    const ageInDays = measuredAt
-      ? Math.floor((measuredAt.getTime() - (await prisma.child.findUniqueOrThrow({ where: { id: childId } })).birthDate.getTime()) / 86_400_000)
-      : undefined;
+    const effectiveMeasuredAt = measuredAt ?? oldMeasurement.measuredAt;
+    const ageInDays = Math.floor((effectiveMeasuredAt.getTime() - child.birthDate.getTime()) / 86_400_000);
+
+    // P1-1: nilai akhir setelah update, bukan nilai di body, yang dihitung.
+    const nextWeight = body.weightKg ?? (oldMeasurement.weightKg === null ? null : Number(oldMeasurement.weightKg));
+    const nextHeight = body.heightCm ?? (oldMeasurement.heightCm === null ? null : Number(oldMeasurement.heightCm));
+    const nextHead = body.headCircumferenceCm ?? (oldMeasurement.headCircumferenceCm === null ? null : Number(oldMeasurement.headCircumferenceCm));
+    const nextArm = body.armCircumferenceCm ?? (oldMeasurement.armCircumferenceCm === null ? null : Number(oldMeasurement.armCircumferenceCm));
+
+    const growth = await computeGrowthStatus({
+      gender: child.gender,
+      ageInDays,
+      weightKg: nextWeight,
+      heightCm: nextHeight,
+      headCircumferenceCm: nextHead
+    });
+
+    const ageMonth = Math.floor(ageInDays / 30.4375);
+    const armStatus = computeArmCircumferenceStatus(nextArm, ageMonth);
+
+    const prevMeasurement = await prisma.childMeasurement.findFirst({
+      where: { childId, measuredAt: { lt: effectiveMeasuredAt }, id: { not: id } },
+      orderBy: { measuredAt: "desc" }
+    });
+    const prevWeight = prevMeasurement?.weightKg !== null && prevMeasurement?.weightKg !== undefined
+      ? Number(prevMeasurement.weightKg)
+      : null;
+    const growthTrend = computeGrowthTrend(nextWeight, prevWeight);
 
     const measurement = await prisma.childMeasurement.update({
       where: { id },
@@ -140,11 +199,18 @@ router.put("/:id", async (req, res, next) => {
         weightKg: body.weightKg,
         heightCm: body.heightCm,
         headCircumferenceCm: body.headCircumferenceCm,
+        armCircumferenceCm: body.armCircumferenceCm,
+        armCircumferenceStatus: armStatus,
+        growthTrend,
         notes: body.notes,
-        weightForAgeStatus: body.weightForAgeStatus,
-        heightForAgeStatus: body.heightForAgeStatus,
-        weightForHeightStatus: body.weightForHeightStatus,
-        headCircumferenceStatus: body.headCircumferenceStatus,
+        weightForAgeZ: growth.weightForAge.z,
+        heightForAgeZ: growth.heightForAge.z,
+        weightForHeightZ: growth.weightForHeight.z,
+        headCircumferenceZ: growth.headCircumference.z,
+        weightForAgeStatus: growth.weightForAge.label,
+        heightForAgeStatus: growth.heightForAge.label,
+        weightForHeightStatus: growth.weightForHeight.label,
+        headCircumferenceStatus: growth.headCircumference.label,
         updatedAt: new Date(),
         updatedBy: req.user!.id
       }
@@ -164,7 +230,7 @@ router.put("/:id", async (req, res, next) => {
   }
 });
 
-router.delete("/:id", async (req, res, next) => {
+router.delete("/:id", requireStrictAuth, async (req, res, next) => {
   try {
     const { childId } = childIdParamSchema.parse(req.params);
     const { id } = idParamSchema.parse(req.params);
